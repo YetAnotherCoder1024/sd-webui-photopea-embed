@@ -152,13 +152,8 @@ function sendImageToWebUi(webUiTab, sendToControlNet, controlnetModelIndex, blob
     }
 
     if (sendToControlNet) {
-        // First, select the ControlNet accordion div.
-        const tabId = webUiTab === "txt2img"
-            ? "#txt2img_script_container"
-            : "#img2img_script_container";
-        const controlNetDiv = gradioApp().querySelector(tabId).querySelector("#controlnet");
-        // Check if the ControlNet accordion is open by finding the image editing iFrames.
-        setImageOnControlNetInput(controlNetDiv, controlnetModelIndex, file);
+        // Forge's ControlNet names every unit, so the tab name is all we need to find it.
+        setImageOnControlNetInput(webUiTab, controlnetModelIndex, file);
     } else {
         // For regular tabs, it's less involved - we can simply set the image on input directly.
         const imageInput = gradioApp().getElementById(`mode_${webUiTab}`).querySelector("input[type='file']");
@@ -216,28 +211,57 @@ function sendImageWithMaskSelectionToWebUi() {
 }
 
 // Navigates to the correct ControlNet model tab, then sets the image.
-function setImageOnControlNetInput(controlNetDiv, controlNetModelIndex, file) {
-    if (controlNetAccordionIsCollapsed(controlNetDiv)) {
-        // The accordion is not open. Find the little icon arrow and click it (yes, if the arrow
-        // ever changes, this will break).
-        controlNetDiv.querySelector("span.icon").click();
-    }
-    waitForWebUiUpdate(controlNetDiv).then(() => {
-        // When more than one Controlnet model is enabled in the WebUI settings, there will be a
-        // series of Controlnet tabs. The one selected in the dropdown will be passed in by the
-        // `controlnetModelIndex`.
-        const tabs = controlNetDiv.querySelectorAll("div.tab-nav > button");
-        if (tabs !== null && tabs.length > 1) {
-            tabs[controlNetModelIndex].click();
-        }
+// The "ControlNet Integrated" accordion starts closed. Opening it is not only cosmetic: it
+// is what lets you see that the image landed on the unit you picked.
+function openControlNetAccordion(webUiTab) {
+    const group = gradioApp().querySelector(`#${webUiTab}_controlnet`);
+    if (group === null) return;
 
-        // HACK: multiplying the index by 2 to match the proper input on the newest ControlNet extension
-        // was determined empirically and will likely break in the future (as all other DOM-based 
-        // addressing tends to)
-        imageInput = controlNetDiv.querySelectorAll("input[type='file']")[controlNetModelIndex * 2];
-        setImageOnInput(imageInput, file);
+    const label = group.querySelector(".label-wrap");
+    if (label !== null && !label.classList.contains("open")) {
+        label.click();
     }
-    );
+}
+
+// Forge's built-in ControlNet gives every unit a predictable elem_id
+// (extensions-builtin/sd_forge_controlnet/scripts/controlnet.py):
+//
+//     {tab}_controlnet_ControlNet-{index}_input_image
+//
+// so the field is addressed by name instead of by position.
+//
+// THIS USED TO ASSUME THE UNITS WERE TABS. It clicked `div.tab-nav > button` at the chosen
+// index and then picked `input[type=file]` number `index * 2`. Neither holds in Forge:
+//
+//   - The units are accordions side by side, not tabs. The only `tab-nav` buttons inside
+//     the accordion are the "Single Image / Batch Folder / Batch Upload" tabs *within* a
+//     unit, so a non-zero index silently switched some unit into a batch mode.
+//   - Each unit owns several file inputs (input image, mask, batch upload), and the image
+//     one lives inside a ForgeCanvas, so `index * 2` does not land on it.
+//
+// The visible result was that every index ended up on unit 0.
+function setImageOnControlNetInput(webUiTab, controlNetModelIndex, file) {
+    openControlNetAccordion(webUiTab);
+
+    const unitId = `${webUiTab}_controlnet_ControlNet-${controlNetModelIndex}_input_image`;
+    const unit = gradioApp().querySelector(`#${unitId}`);
+    if (unit === null) {
+        console.error(`[photopea-embed] ControlNet unit ${controlNetModelIndex} not found (#${unitId}). `
+            + `Is 'control_net_unit_count' in Settings lower than the index you picked?`);
+        return;
+    }
+
+    // .forge-file-upload is the ForgeCanvas upload input
+    // (modules_forge/forge_canvas/canvas.html); the generic selector is a fallback in case
+    // a future ControlNet drops the ForgeCanvas.
+    const imageInput = unit.querySelector("input.forge-file-upload")
+        || unit.querySelector("input[type='file']");
+    if (imageInput === null) {
+        console.error(`[photopea-embed] no file input inside #${unitId}`);
+        return;
+    }
+
+    setImageOnInput(imageInput, file);
 }
 
 // Gradio's image widgets are inputs. To set the image in one, we set the image on the input and
