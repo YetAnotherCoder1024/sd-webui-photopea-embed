@@ -1,12 +1,18 @@
 /* Setup and navigation */
 var photopeaWindow = null;
 var photopeaIframe = null;
+var photopeaSetupDone = false;
 
 // Called by the iframe set up on photopea-tab.py.
+// Photopea now sits behind a Cloudflare challenge: the iframe first loads the challenge page,
+// then reloads into Photopea itself, so this fires more than once. The window reference is
+// refreshed every time, but the buttons and the slider listener must only be added once.
 function onPhotopeaLoaded(iframe) {
     console.log("Photopea iFrame loaded");
     photopeaWindow = iframe.contentWindow;
     photopeaIframe = iframe;
+    if (photopeaSetupDone) return;
+    photopeaSetupDone = true;
 
     // Clone some buttons to send the contents of galleries in txt2img, img2img and extras tabs
     // to Photopea. You can also just copy-paste the images directly but these are the ones I
